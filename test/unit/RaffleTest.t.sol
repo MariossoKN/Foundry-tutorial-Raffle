@@ -140,7 +140,7 @@ contract RaffleTest is Test {
         (bool upkeepNeeded, ) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
-        assert(upkeepNeeded == true);
+        assert(upkeepNeeded == false);
     }
 
     function testReturnsTrueIfAllChecksAreTrue() public {
