@@ -19,6 +19,7 @@ contract RaffleTest is Test {
     address USER = makeAddr("user");
     address USER2 = makeAddr("user2");
     uint256 constant GAS_PRICE = 1;
+    uint256 constant NOT_ENOUTH_TIME_PASSED = 15;
 
     uint64 subscriptionId;
     bytes32 gasLane;
@@ -114,6 +115,7 @@ contract RaffleTest is Test {
         vm.roll(block.number + 1);
 
         (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
@@ -126,21 +128,31 @@ contract RaffleTest is Test {
         raffle.performUpkeep("");
 
         (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
 
-    function testFailsIfNotEnoughTimePassed() public {
+    function testFalseIfTimeDoesntPass1() public {
         vm.prank(USER);
         raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-
-        vm.warp(block.timestamp + 20);
-        vm.roll(block.number + 1);
 
         (bool upkeepNeeded, ) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
-        assert(upkeepNeeded == false);
+        assertEq(upkeepNeeded, false);
+    }
+
+    function testFalseIfTimeDoesntPass2() public {
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+
+        vm.warp(block.timestamp + NOT_ENOUTH_TIME_PASSED);
+        vm.roll(block.number + 1);
+        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        console.log("UpkeepNeeded ==", upkeepNeeded);
+
+        assertEq(upkeepNeeded, false);
     }
 
     function testReturnsTrueIfAllChecksAreTrue() public {
@@ -149,6 +161,7 @@ contract RaffleTest is Test {
         vm.warp(block.timestamp + interval + 1);
         vm.roll(block.number + 1);
         (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        console.log("UpkeepNeeded ==", upkeepNeeded);
         assertEq(upkeepNeeded, true);
     }
 
@@ -160,5 +173,75 @@ contract RaffleTest is Test {
         vm.prank(USER);
         vm.expectRevert();
         raffle.performUpkeep("");
+    }
+
+    function testRaffleStatusIsCalculatingAfterSuccessfulCall() public {
+        assertEq(uint256(raffle.getRaffleState()), 0);
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        vm.warp(block.timestamp + interval + 1);
+        vm.roll(block.number + 1);
+        raffle.performUpkeep("");
+        assertEq(uint256(raffle.getRaffleState()), 1);
+    }
+
+    /////////////////////////////
+    // fulfillRandomWords TEST //
+    /////////////////////////////
+
+    /////////////////////////////
+    // getter functions TEST ////
+    /////////////////////////////
+    /**
+     * @dev some getter functions are tested in constructor tests
+     */
+
+    function testGetRaffleState() public {
+        assertEq(uint256(raffle.getRaffleState()), 0);
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        vm.warp(block.timestamp + interval + 1);
+        vm.roll(block.number + 1);
+        raffle.performUpkeep("");
+        assertEq(uint256(raffle.getRaffleState()), 1);
+    }
+
+    function testGetNumWords() public {
+        assertEq(raffle.getNumWords(), 1);
+    }
+
+    function testGetRequestConfirmations() public {
+        assertEq(raffle.getRequestConfirmations(), 3);
+    }
+
+    // function testGetRecentWinner() public {
+    //     vm.prank(USER);
+    //     raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+    //     vm.warp(block.timestamp + interval + 1);
+    //     vm.roll(block.number + 1);
+    //     raffle.performUpkeep("");
+    //     assertEq(raffle.getRecentWinner(), USER);
+    // }
+
+    function testGetPlayer() public {
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        vm.prank(USER2);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        assertEq(raffle.getPlayer(0), USER);
+        assertEq(raffle.getPlayer(1), USER2);
+    }
+
+    function testGetLastTimeStamp() public {
+        assert(raffle.getLastTimeStamp() > 0);
+    }
+
+    function testGetNumberOfPlayers() public {
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        assertEq(raffle.getNumberOfPlayers(), 1);
+        vm.prank(USER2);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        assertEq(raffle.getNumberOfPlayers(), 2);
     }
 }
