@@ -6,13 +6,24 @@ import {Raffle} from "../../src/Raffle.sol";
 import {Test, console} from "../../lib/forge-std/src/Test.sol";
 import {DeployRaffle} from "../../script/DeployRaffle.s.sol";
 import {HelperConfig} from "../../script/HelperConfig.s.sol";
+import {Vm} from "../../lib/forge-std/src/Vm.sol";
+import {VRFCoordinatorV2Mock} from "../../test/mock/VRFCoordinatorV2Mock.sol";
 
 contract RaffleTest is Test {
     // Events
     event RaffleEnter(address indexed player);
 
+    modifier raffleEnteredAndTimeIncreased() {
+        vm.prank(USER);
+        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+        vm.warp(block.timestamp + interval + 1);
+        vm.roll(block.number + 1);
+        _;
+    }
+
     Raffle raffle;
     HelperConfig helperConfig;
+    VRFCoordinatorV2Mock vrfCoordinatorV2Mock;
     uint256 constant NOT_ENOUGH_ETH_SENT = 0.009 ether;
     uint256 constant ENOUGH_ETH_SENT = 0.01 ether;
     uint256 constant STARTING_BALANCE = 20e18;
@@ -33,15 +44,8 @@ contract RaffleTest is Test {
         (raffle, helperConfig) = deployRaffle.run();
         vm.deal(USER, STARTING_BALANCE);
         vm.deal(USER2, STARTING_BALANCE);
-        (
-            subscriptionId,
-            gasLane,
-            interval,
-            entranceFee,
-            callbackGasLimit,
-            vrfCoordinatorV2,
-
-        ) = helperConfig.activeNetworkConfig();
+        (subscriptionId, gasLane, interval, entranceFee, callbackGasLimit, vrfCoordinatorV2,) =
+            helperConfig.activeNetworkConfig();
     }
 
     //////////////////////
@@ -114,53 +118,45 @@ contract RaffleTest is Test {
         vm.warp(block.timestamp + interval + 1);
         vm.roll(block.number + 1);
 
-        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
 
-    function testFalseIfInCalculatingState() public {
-        vm.prank(USER);
-        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-        vm.warp(block.timestamp + interval + 1);
-        vm.roll(block.number + 1);
+    function testFalseIfInCalculatingState() public raffleEnteredAndTimeIncreased {
         raffle.performUpkeep("");
 
-        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
 
-    function testFalseIfTimeDoesntPass1() public {
+    function testFalseIfNotEnoughTimePassed1() public {
         vm.prank(USER);
         raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
 
-        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
 
-    function testFalseIfTimeDoesntPass2() public {
+    function testFalseIfNotEnoughTimePassed2() public {
         vm.prank(USER);
         raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
 
         vm.warp(block.timestamp + NOT_ENOUTH_TIME_PASSED);
         vm.roll(block.number + 1);
-        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
 
         assertEq(upkeepNeeded, false);
     }
 
-    function testReturnsTrueIfAllChecksAreTrue() public {
-        vm.prank(USER);
-        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-        vm.warp(block.timestamp + interval + 1);
-        vm.roll(block.number + 1);
-        (bool upkeepNeeded, ) = raffle.checkUpkeep("");
+    function testReturnsTrueIfAllChecksAreTrue() public raffleEnteredAndTimeIncreased {
+        (bool upkeepNeeded,) = raffle.checkUpkeep("");
         console.log("UpkeepNeeded ==", upkeepNeeded);
         assertEq(upkeepNeeded, true);
     }
@@ -169,25 +165,57 @@ contract RaffleTest is Test {
     // performUpkeep TEST //
     ////////////////////////
 
-    function testRevertIfUpkeepNeededIsNoTrue() public {
+    function testRevertIfUpkeepNeededIsNotTrue() public {
         vm.prank(USER);
-        vm.expectRevert();
+        uint256 balance = 0;
+        uint256 playersAmount = 0;
+        uint256 raffleState = 0;
+        // Revert with custom error + parameters
+        vm.expectRevert(
+            abi.encodeWithSelector(Raffle.Raffle__UpkeepNotNeeded.selector, balance, playersAmount, raffleState)
+        );
         raffle.performUpkeep("");
     }
 
-    function testRaffleStatusIsCalculatingAfterSuccessfulCall() public {
+    function testRaffleStatusIsCalculatingAfterSuccessfulCall() public raffleEnteredAndTimeIncreased {
         assertEq(uint256(raffle.getRaffleState()), 0);
-        vm.prank(USER);
-        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-        vm.warp(block.timestamp + interval + 1);
-        vm.roll(block.number + 1);
         raffle.performUpkeep("");
         assertEq(uint256(raffle.getRaffleState()), 1);
+    }
+
+    function testPerformUpkeepEmitsRequestedId() public raffleEnteredAndTimeIncreased {
+        vm.recordLogs();
+        raffle.performUpkeep("");
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bytes32 requestId = entries[1].topics[1];
+
+        assert(uint256(requestId) > 0);
+        console.log("requestId ==", uint256(requestId));
     }
 
     /////////////////////////////
     // fulfillRandomWords TEST //
     /////////////////////////////
+    function testFulfillRandomWordCanOnlyBeCalledAfterPerformUpkeep(uint256 _randomRequestId)
+        public
+        raffleEnteredAndTimeIncreased
+    {
+        vm.expectRevert();
+        VRFCoordinatorV2Mock(vrfCoordinatorV2Mock).fulfillRandomWords(_randomRequestId, address(raffle));
+    }
+
+    // function testFulfillRandomWordsPicksWinnerResetsAndSendMoney() public {
+    //     vm.prank(USER);
+    //     raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+    //     assert(raffle.getPlayer(0) == USER);
+    //     vm.warp(block.timestamp + interval + 1);
+    //     vm.roll(block.number + 1);
+    //     assert((raffle.getRecentWinner()) == address(0));
+    //     raffle.performUpkeep("");
+    //     VRFCoordinatorV2Mock(vrfCoordinatorV2Mock).fulfillRandomWords(1, address(raffle));
+    //     console.log(raffle.getRecentWinner());
+
+    // }
 
     /////////////////////////////
     // getter functions TEST ////
@@ -195,13 +223,8 @@ contract RaffleTest is Test {
     /**
      * @dev some getter functions are tested in constructor tests
      */
-
-    function testGetRaffleState() public {
+    function testGetRaffleState() public raffleEnteredAndTimeIncreased {
         assertEq(uint256(raffle.getRaffleState()), 0);
-        vm.prank(USER);
-        raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-        vm.warp(block.timestamp + interval + 1);
-        vm.roll(block.number + 1);
         raffle.performUpkeep("");
         assertEq(uint256(raffle.getRaffleState()), 1);
     }
@@ -214,15 +237,6 @@ contract RaffleTest is Test {
         assertEq(raffle.getRequestConfirmations(), 3);
     }
 
-    // function testGetRecentWinner() public {
-    //     vm.prank(USER);
-    //     raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-    //     vm.warp(block.timestamp + interval + 1);
-    //     vm.roll(block.number + 1);
-    //     raffle.performUpkeep("");
-    //     assertEq(raffle.getRecentWinner(), USER);
-    // }
-
     function testGetPlayer() public {
         vm.prank(USER);
         raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
@@ -232,7 +246,7 @@ contract RaffleTest is Test {
         assertEq(raffle.getPlayer(1), USER2);
     }
 
-    function testGetLastTimeStamp() public {
+    function testGetLastTimeStamp() public view {
         assert(raffle.getLastTimeStamp() > 0);
     }
 
