@@ -200,22 +200,41 @@ contract RaffleTest is Test {
         public
         raffleEnteredAndTimeIncreased
     {
-        vm.expectRevert();
-        VRFCoordinatorV2Mock(vrfCoordinatorV2Mock).fulfillRandomWords(_randomRequestId, address(raffle));
+        vm.expectRevert("nonexistent request");
+        VRFCoordinatorV2Mock(vrfCoordinatorV2).fulfillRandomWords(_randomRequestId, address(raffle));
     }
 
-    // function testFulfillRandomWordsPicksWinnerResetsAndSendMoney() public {
-    //     vm.prank(USER);
-    //     raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
-    //     assert(raffle.getPlayer(0) == USER);
-    //     vm.warp(block.timestamp + interval + 1);
-    //     vm.roll(block.number + 1);
-    //     assert((raffle.getRecentWinner()) == address(0));
-    //     raffle.performUpkeep("");
-    //     VRFCoordinatorV2Mock(vrfCoordinatorV2Mock).fulfillRandomWords(1, address(raffle));
-    //     console.log(raffle.getRecentWinner());
+    function testFulfillRandomWordsPicksWinnerResetsAndSendMoney() public {
+        uint256 playersAmount = 10;
+        for (uint256 i = 1; i < playersAmount + 1; i++) {
+            address player = address(uint160(i));
+            hoax(player, STARTING_BALANCE);
+            raffle.enterRaffle{value: ENOUGH_ETH_SENT}();
+            // assert(raffle.getPlayer(i) == player);
+        }
+        vm.warp(block.timestamp + interval + 1);
+        vm.roll(block.number + 1);
 
-    // }
+        vm.recordLogs();
+        raffle.performUpkeep("");
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+        bytes32 requestId = entries[1].topics[1];
+
+        uint256 startingTimeStamp = raffle.getLastTimeStamp();
+
+        VRFCoordinatorV2Mock(vrfCoordinatorV2).fulfillRandomWords(uint256(requestId), address(raffle));
+
+        assert((raffle.getRecentWinner()) != address(0));
+        assertEq(uint256(raffle.getRaffleState()), 0);
+        assertEq(raffle.getNumberOfPlayers(), 0);
+        console.log(raffle.getLastTimeStamp());
+        console.log(startingTimeStamp);
+        assert(raffle.getLastTimeStamp() > startingTimeStamp);
+        assert(
+            (raffle.getRecentWinner()).balance
+                == (STARTING_BALANCE - ENOUGH_ETH_SENT) + (ENOUGH_ETH_SENT * playersAmount)
+        );
+    }
 
     /////////////////////////////
     // getter functions TEST ////
