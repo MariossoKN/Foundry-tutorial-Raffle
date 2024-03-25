@@ -9,7 +9,7 @@ import {HelperConfig} from "../../script/HelperConfig.s.sol";
 import {Vm} from "../../lib/forge-std/src/Vm.sol";
 import {VRFCoordinatorV2Mock} from "../../test/mock/VRFCoordinatorV2Mock.sol";
 
-contract RaffleTest is Test {
+contract InteractionsTest is Test {
     // Events
     event RaffleEnter(address indexed player);
 
@@ -54,7 +54,7 @@ contract RaffleTest is Test {
     //////////////////////
 
     function testConstructorParametersAreCorrect() public {
-        // assertEq(raffle.getSubId(), 10478);
+        assertEq(raffle.getSubId(), subscriptionId);
         assertEq(raffle.getGasLane(), gasLane);
         assertEq(raffle.getInterval(), interval);
         assertEq(raffle.getEntranceFee(), entranceFee);
